@@ -132,26 +132,41 @@ var Crypt = function() {
 			if ((a[0] == b[0]) && (a[1] == b[1])) {
 				return this.double(a);
 			}
+			if ((a[0] == 0) && (a[1] == 0)) {
+				return b;
+			}
+			if ((b[0] == 0) && (b[1] == 0)) {
+				return a;
+			}
 			var l = (b[1]-a[1])*self.modInverse(b[0]-a[0],this.m);
 			var x = (l*l)-(a[0]+b[0]);
 			var y = (l*(a[0]-x))-a[1];
 			return [self.mod(x,this.m),self.mod(y,this.m)];
 		}
 		this.double = function(p) {
+			if ((p[0] == 0) && (p[1] == 0)) {
+				return [0n,0n];
+			}
 			var l = ((3n*p[0]*p[0])+this.a)*self.modInverse(p[1]+p[1],this.m);
 			var x = (l*l)-(2n*p[0]);
 			var y = (l*(p[0]-x))-p[1];
 			return [self.mod(x,this.m),self.mod(y,this.m)];
 		}
 		this.multiply = function(p,n) {
-			if (n < 1) {
+			if (n < 1n) {
 				return [0n,0n];
 			}
+			var m = -1n;
+			var q = n;
+			while (q) {
+				m++;
+				q >>= 1n;
+			}
 			var result = p;
-			n = n.toString(2);
-			for (var i=1; i<n.length; i++) {
+			while (m > 0n) {
+				m--;
 				result = this.double(result);
-				if (n[i] == '1') {
+				if ((n>>m)&1n) {
 					result = this.add(result,p);
 				}
 			}
@@ -165,6 +180,10 @@ var Crypt = function() {
 		this.curve = curve;
 		this.g = genoratorPoint;
 		this.n = order;
+		this.Hash = null;
+		this.setSignHashFunction = function(hashFunct) {
+			this.Hash = hashFunct;
+		}
 		this.getPublicKey = function(sk) {
 			return this.curve.multiply(this.g,sk);
 		}
@@ -190,7 +209,10 @@ var Crypt = function() {
 			}
 		}
 		this.sign = function(message,sk) {
-			var msg = self.bufferToBigInt(self.Keccak256(message));
+			if (!this.Hash) {
+				throw new Error("No Hash set for this PublicCurve, try running PublicCurve.setSignHashFunction(HashFunction) to fix this. HashFunction can be any function but if your lazy just use Crypt.Keccak256 or Crypt.Keccak384");
+			}
+			var msg = self.bufferToBigInt(this.Hash(message));
 			var k = (self.bufferToBigInt(self.randomBytes(this.OrderBytes))%(this.n-1n))+1n;
 			var kG = this.curve.multiply(this.g,k);
 			var r = kG[0]%this.n;
@@ -213,7 +235,7 @@ var Crypt = function() {
 			};
 		}
 		this.recoverPublicKey = function(signiture) {
-			var msg = self.bufferToBigInt(self.Keccak256(signiture.Message));
+			var msg = self.bufferToBigInt(this.Hash(signiture.Message));
 			var sign = BigInt(signiture.Signiture);
 			var isnegitive = (sign >= this.n*this.n);
 			var r = sign%this.n;
@@ -236,124 +258,44 @@ var Crypt = function() {
 			return pk;
 		}
 		this.verify = function(signiture,pk) {
-			var msg = self.bufferToBigInt(self.Keccak256(signiture.Message));
+			var msg = self.bufferToBigInt(this.Hash(signiture.Message));
 			var sign = BigInt(signiture.Signiture);
 			var r = sign%this.n;
-			var s = sign/this.n;
-			if (s >= this.n) {
-				return false;
-			}
+			var s = (sign/this.n)%this.n;
 			var w = self.modInverse(s,this.n);
 			var u1 = self.mod(msg*w,this.n);
 			var u2 = self.mod(r*w,this.n);
 			var p0 = this.curve.multiply(this.g,u1);
 			var p1 = this.curve.multiply(pk,u2);
 			var X = this.curve.add(p0,p1);
-			var v = X[0];
+			var v = X[0]%this.n;
 			return v == r && v != 0n;
 		}
 	}
 	this.SignedMessageToBuffer = function(signiture) {
 		var msg = signiture.Message;
 		if (msg.constructor === String) {
-			msg = Buffer.from(msg,'utf-8');
+			if (typeof window === 'undefined') {
+				msg = Buffer.from(msg,'utf-8');
+			} else {
+				msg = (new TextEncoder()).encode(msg);
+			}
 		}
 		var BufferA = self.bigIntToBuffer(BigInt(signiture.Signiture));
-		var result = new Uint8Array(msg.length+65);
-		result.set(msg,0);
-		result.set(BufferA,result.length-BufferA.length);
+		var result = new Uint8Array(msg.length+BufferA.length+1);
+		result[0] = BufferA.length;
+		result.set(BufferA,1);
+		result.set(msg,BufferA.length+1);
 		return result;
 	}
 	this.BufferToSignedMessage = function(buffer) {
-		var msg = buffer.slice(0,buffer.length-65);
-		var sign = buffer.slice(buffer.length-65);
+		var len = buffer[0]+1;
+		var msg = buffer.subarray(len);
+		var sign = buffer.subarray(1,len);
 		return {
 			Message:msg,
 			Signiture:"0x"+self.bufferToBigInt(sign).toString(16)
 		};
-	}
-	this.parseAmount = function(a) {
-		if (a.constructor === String) {
-			var idx = a.indexOf(".");
-			if (idx == -1) {
-				return BigInt(a)*1000000000000000000n;
-			} else {
-				var result = BigInt(a.split(".").join(""));
-				idx = a.length-idx-1;
-				if (idx > 18) {
-					return result/(10n**BigInt(idx-18));
-				} else {
-					return result*(10n**BigInt(18-idx));
-				}
-			}
-		} else if (a.constructor === BigInt) {
-			return a;
-		} else if (a.constructor === Number) {
-			return BigInt(a*1000000000000000000);
-		}
-	}
-	this.Zeros = "0".repeat(256);
-	this.amountToString = function(am) {
-		if (am >= 0) {
-			return (am/1000000000000000000n).toString()+"."+(self.Zeros+(am%1000000000000000000n).toString()).slice(-18);
-		} else {
-			am = -am;
-			return "-"+(am/1000000000000000000n).toString()+"."+(self.Zeros+(am%1000000000000000000n).toString()).slice(-18);
-		}
-	}
-	this.Tx = function(sendAdress,Amount,Fee,Change) {
-		this.To = sendAdress;
-		this.From = null;
-		this.Amount = Amount;
-		this.Fee = Fee;
-		this.Change = Change;
-		var ad = new Uint8Array(33);
-		var adnum = self.bigIntToBuffer(BigInt(this.To));
-		ad.set(adnum,33-adnum.length);
-		var am = self.bigIntToBuffer(BigInt(this.Amount));
-		var fe = self.bigIntToBuffer(BigInt(this.Fee));
-		var ch = self.bigIntToBuffer(BigInt(this.Change));
-		var Tx = new Uint8Array(ad.length+am.length+fe.length+ch.length+3);
-		Tx.set(ad,0);
-		Tx[ad.length] = am.length;
-		Tx.set(am,ad.length+1);
-		Tx[ad.length+1+am.length] = fe.length;
-		Tx.set(fe,ad.length+am.length+2);
-		Tx[ad.length+fe.length+am.length+2] = ch.length;
-		Tx.set(ch,ad.length+fe.length+am.length+3);
-		this.UnsignedTx = Tx;
-		this.Signiture = null;
-		this.SignedTx = null;
-		this.sign = function(sk) {
-			this.Signiture = self.PublicPrameters.sign(this.UnsignedTx,sk);
-			this.SignedTx = self.SignedMessageToBuffer(this.Signiture);
-			this.From = self.PublicPrameters.toAdress(self.PublicPrameters.getPublicKey(sk));
-			return this.SignedTx;
-		}
-	}
-	this.parseTx = function(buff) {
-		var To = "0x"+self.bufferToBigInt(buff.subarray(0,33)).toString(16);
-		var idx = 34;
-		var len = buff[33];
-		var Am = self.bufferToBigInt(buff.subarray(idx,idx+len));
-		idx += len+1;
-		len = buff[idx-1];
-		var Fe = self.bufferToBigInt(buff.subarray(idx,idx+len));
-		idx += len+1;
-		len = buff[idx-1];
-		var Ch = self.bufferToBigInt(buff.subarray(idx,idx+len));
-		return {
-			To:To,
-			Fee:{RawTokenAmount:Fe,Value:Number(Fe)/1000000000000000000},
-			Amount:{RawTokenAmount:Am,Value:Number(Am)/1000000000000000000},
-			Change:{RawTokenAmount:Ch,Value:Number(Ch)/1000000000000000000},
-		}
-	}
-	this.parseSignedTx = function(buff) {
-		var SignedTx = self.BufferToSignedMessage(buff);
-		var Tx = self.parseTx(SignedTx.Message);
-		Tx.From = self.PublicPrameters.toAdress(self.PublicPrameters.recoverPublicKey(SignedTx));
-		return Tx;
 	}
 	this.toHex = function(arr) {
 		var result = "";
@@ -586,8 +528,16 @@ var Crypt = function() {
 		var hash = new self.Hash.Keccak(256, [1, 256, 65536, 16777216], 256);
 		return hash.update(msg).arrayBuffer();
 	}
-	this.PublicC = new self.ECurve(0n,7n,0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn);
-	this.PublicPrameters = new self.PublicCurve(this.PublicC,[0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n,0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n],0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n);
+	this.Keccak384 = function(msg) {
+		var hash = new self.Hash.Keccak(384, [1, 256, 65536, 16777216], 384);
+		return hash.update(msg).arrayBuffer();
+	}
+	this.secp256k1Curve = new self.ECurve(0n,7n,0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn);
+	this.secp256k1 = new self.PublicCurve(this.secp256k1Curve,[0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n,0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n],0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n);
+	this.secp256k1.setSignHashFunction(this.Keccak256);
+	this.secp384r1Curve = new self.ECurve(0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffcn,0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aefn,0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffffn);
+	this.secp384r1 = new self.PublicCurve(this.secp384r1Curve,[0xaa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7n,0x3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5fn],0xffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973n);
+	this.secp384r1.setSignHashFunction(this.Keccak384);
 }
 if (typeof window === 'undefined') {
 	module.exports = Crypt;
