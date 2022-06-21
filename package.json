@@ -1,13 +1,19 @@
 {
-  "name": "Crypt",
+  "name": "khawn2u-crypt",
   "description": "Keccak256 Hash along with ECDSA signing algorthem. Ment for KryptCoin Cryptocurrency",
-  "version": "1.0.0",
+  "version": "1.1.7",
   "main": "index.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/Khawn2u/Crypt/"
   },
-  "keywords": ["Cryptocurrency","Crypt"],
+  "keywords": [
+    "Cryptocurrency",
+    "Crypt"
+  ],
   "author": "Khawn2u",
-  "homepage": "https://github.com/Khawn2u/Crypt/"
+  "homepage": "https://github.com/Khawn2u/Crypt/",
+  "dependencies": {
+    "khawn2u-crypt": "^1.1.1"
+  }
 }
