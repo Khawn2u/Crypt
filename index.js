@@ -549,6 +549,10 @@ var Crypt = function() {
 		var hash = new self.Hash.Keccak(384, [1, 256, 65536, 16777216], 384);
 		return hash.update(msg).arrayBuffer();
 	}
+	this.Keccak512 = function(msg) {
+		var hash = new self.Hash.Keccak(512, [1, 256, 65536, 16777216], 512);
+		return hash.update(msg).arrayBuffer();
+	}
 	this.secp256k1Curve = new self.ECurve(0n,7n,0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn);
 	this.secp256k1 = new self.PublicCurve(this.secp256k1Curve,[0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n,0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n],0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n);
 	this.secp256k1.setSignHashFunction(this.Keccak256);
